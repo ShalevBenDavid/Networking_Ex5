@@ -1,8 +1,15 @@
+// Created by Shalev Ben David and Ron Shuster.
+
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <netinet/ip.h>
 #include <stdlib.h>
+#include <unistd.h>
+
+unsigned short in_cksum(unsigned short *, int);
+int spoofICMP(char *);
+int spoofUDP(char *, int);
 
 /* ICMP Header  */
 struct icmpheader {
@@ -39,6 +46,215 @@ struct udpheader
   u_int16_t udp_sum;             /* udp checksum */
 };
 
+/********************************************************
+  User Choice: 0 To Exit, 1 To Spoof ICMP, 2 To Spoof UDP
+*********************************************************/
+int main() {
+    int choice = 0;
+    printf("Enter (1) to spoof ICMP packet\nEnter (2) to spoof UDP packet\nEnter (0) to exit\n");
+    scanf("%d", &choice);
+    while(choice != 0) {
+        if(choice == 1) { // ICMP
+            char dest[16];
+            printf("Enter ip to send spoofed packet: ");
+            scanf("%s",dest);
+            int spoofer = spoofICMP(dest);
+            if (spoofer!=0){
+                perror("(-) Spoofing failed.\n");
+                exit(EXIT_FAILURE);
+            } else {
+                printf("(+) Spoofed successfully.\n");
+            }
+        }
+
+        else if (choice == 2) { // UDP
+            char dest[16];
+            int port = 0;
+            printf("Enter ip to send spoofed packet: ");
+            scanf("%s", dest);
+            printf("Enter port to send spoofed packet: ");
+            scanf("\n %d", &port);
+            int spoofer = spoofUDP(dest,port);
+            if (spoofer != 0) {
+                perror("(-) Spoofing failed.\n");
+                exit(EXIT_FAILURE);
+            } else {
+                printf("(+) Spoofed successfully.\n");
+            }
+        }
+        else {
+            perror("(-) Invalid input. \n");
+            exit(EXIT_FAILURE);
+        }
+        printf("Enter (1) to spoof ICMP packet\nEnter (2) to spoof UDP packet\nEnter (0) to exit\n");
+        scanf("%d", &choice);
+    }
+    return 0;
+}
+
+/***************************************************
+  Given an IP packet, send it out using a raw socket.
+****************************************************/
+void send_raw_ip_packet(struct ipheader* ip)
+{
+    struct sockaddr_in dest_info;
+    int enable = 1;
+
+    // Step 1: Create a raw network socket.
+    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+
+    // Step 2: Set socket option.
+    setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &enable, sizeof(enable));
+
+    // Step 3: Provide needed information about destination.
+    dest_info.sin_family = AF_INET;
+    dest_info.sin_addr = ip -> iph_destip;
+
+    // Step 4: Send the packet out.
+    sendto(sock, ip, ntohs(ip->iph_len), 0, (struct sockaddr *)&dest_info, sizeof(dest_info));
+
+    // Step 5: Close the socket.
+    close(sock);
+}
+
+/******************************************************************
+  Spoof an ICMP echo request using an arbitrary source IP Address
+*******************************************************************/
+int spoofICMP(char *dest) {
+   char buffer[1500];
+   memset(buffer, 0, 1500);
+
+   /*********************************************************
+      Step 1: Fill in the ICMP header.
+    ********************************************************/
+   struct icmpheader *icmp = (struct icmpheader *)(buffer + sizeof(struct ipheader));
+   icmp -> icmp_type = 8; //ICMP Type: 8 is request, 0 is reply.
+
+   // Calculate the checksum for integrity
+   icmp -> icmp_chksum = 0;
+   icmp -> icmp_chksum = in_cksum((unsigned short *)icmp,sizeof(struct icmpheader));
+
+   /*********************************************************
+      Step 2: Fill in the IP header.
+    ********************************************************/
+   struct ipheader *ip = (struct ipheader *) buffer;
+   ip -> iph_ver = 4;
+   ip -> iph_ihl = 5;
+   ip -> iph_ttl = 20;
+   ip -> iph_sourceip.s_addr = inet_addr("1.2.3.4");
+   ip -> iph_destip.s_addr = inet_addr(dest);
+   ip -> iph_protocol = IPPROTO_ICMP;
+   ip -> iph_len = htons(sizeof(struct ipheader) + sizeof(struct icmpheader));
+
+   /*********************************************************
+      Step 3: Finally, send the spoofed packet
+    ********************************************************/
+   send_raw_ip_packet (ip);
+
+   return 0;
+}
+
+/******************************************************************
+  Spoof a UDP packet using an arbitrary source IP Address and port 
+*******************************************************************/
+int spoofUDP(char *dest, int port) {
+   char buffer[1500];
+
+   memset(buffer, 0, 1500);
+   struct ipheader *ip = (struct ipheader *) buffer;
+   struct udpheader *udp = (struct udpheader *) (buffer +
+                                          sizeof(struct ipheader));
+
+   /*********************************************************
+      Step 1: Fill in the UDP data field.
+    ********************************************************/
+   char *data = buffer + sizeof(struct ipheader) +
+                         sizeof(struct udpheader);
+   const char *msg = "Hello Server!\n";
+   int data_len = strlen(msg);
+   strncpy (data, msg, data_len);
+
+   /*********************************************************
+      Step 2: Fill in the UDP header.
+    ********************************************************/
+   udp -> udp_sport = htons(12345);
+   udp -> udp_dport = htons(port);
+   udp -> udp_ulen = htons(sizeof(struct udpheader) + data_len);
+   udp -> udp_sum =  0; /* Many OSes ignore this field, so we do not
+                         calculate it. */
+
+   /*********************************************************
+      Step 3: Fill in the IP header.
+    ********************************************************/
+
+   ip -> iph_ver = 4;
+   ip -> iph_ihl = 5;
+   ip -> iph_ttl = 21;
+   ip -> iph_sourceip.s_addr = inet_addr("1.2.3.4"); // Spoofed source ip address.
+   ip -> iph_destip.s_addr = inet_addr(dest); // Same destination ip.
+   ip -> iph_protocol = IPPROTO_UDP;
+   ip -> iph_len = htons(sizeof(struct ipheader) +sizeof(struct icmpheader) + data_len);
+
+   /*********************************************************
+      Step 4: Finally, send the spoofed packet
+    ********************************************************/
+   send_raw_ip_packet (ip);
+
+   return 0;
+}
+
+/******************************************************************
+  Spoof a TCP packet using an arbitrary source IP Address and port
+*******************************************************************/
+int spoofTCP(char *dest, int port) {
+    char buffer[1500];
+
+    memset(buffer, 0, 1500);
+    struct ipheader *ip = (struct ipheader *) buffer;
+    struct udpheader *udp = (struct udpheader *) (buffer +
+                                                  sizeof(struct ipheader));
+
+    /*********************************************************
+       Step 1: Fill in the UDP data field.
+     ********************************************************/
+    char *data = buffer + sizeof(struct ipheader) +
+                 sizeof(struct udpheader);
+    const char *msg = "Hello Server!\n";
+    int data_len = strlen(msg);
+    strncpy (data, msg, data_len);
+
+    /*********************************************************
+       Step 2: Fill in the UDP header.
+     ********************************************************/
+    udp -> udp_sport = htons(12345);
+    udp -> udp_dport = htons(port);
+    udp -> udp_ulen = htons(sizeof(struct udpheader) + data_len);
+    udp -> udp_sum =  0; /* Many OSes ignore this field, so we do not
+                         calculate it. */
+
+    /*********************************************************
+       Step 3: Fill in the IP header.
+     ********************************************************/
+
+    ip -> iph_ver = 4;
+    ip -> iph_ihl = 5;
+    ip -> iph_ttl = 21;
+    ip -> iph_sourceip.s_addr = inet_addr("1.2.3.4"); // Spoofed source ip address.
+    ip -> iph_destip.s_addr = inet_addr(dest); // Same destination ip.
+    ip -> iph_protocol = IPPROTO_UDP;
+    ip -> iph_len = htons(sizeof(struct ipheader) +sizeof(struct icmpheader) + data_len);
+
+    /*********************************************************
+       Step 4: Finally, send the spoofed packet
+     ********************************************************/
+    send_raw_ip_packet (ip);
+
+    return 0;
+}
+
+/*****************
+   Checksum Method
+ *****************/
 unsigned short in_cksum(unsigned short *paddress, int len)
 {
     int nleft = len;
@@ -62,188 +278,4 @@ unsigned short in_cksum(unsigned short *paddress, int len)
     answer = ~sum;                      // truncate to 16 bits
 
     return answer;
-}
-
-
-/*************************************************************
-  Given an IP packet, send it out using a raw socket. 
-**************************************************************/
-void send_raw_ip_packet(struct ipheader* ip)
-{
-    struct sockaddr_in dest_info;
-    int enable = 1;
-
-    // Step 1: Create a raw network socket.
-    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
-
-    // Step 2: Set socket option.
-    setsockopt(sock, IPPROTO_IP, IP_HDRINCL, 
-                     &enable, sizeof(enable));
-
-    // Step 3: Provide needed information about destination.
-    dest_info.sin_family = AF_INET;
-    dest_info.sin_addr = ip->iph_destip;
-
-    // Step 4: Send the packet out.
-    sendto(sock, ip, ntohs(ip->iph_len), 0, 
-           (struct sockaddr *)&dest_info, sizeof(dest_info));
-    close(sock);
-}
-
-
-
-/******************************************************************
-  Spoof an ICMP echo request using an arbitrary source IP Address
-*******************************************************************/
-int spoofICMP(char *dest) {
-
-   char buffer[1500];
-   memset(buffer, 0, 1500);
-   
-
-   /*********************************************************
-      Step 1: Fill in the ICMP header.
-    ********************************************************/
-   struct icmpheader *icmp = (struct icmpheader *) 
-                             (buffer + sizeof(struct ipheader));
-   icmp->icmp_type = 8; //ICMP Type: 8 is request, 0 is reply.
-
-   // Calculate the checksum for integrity
-   icmp->icmp_chksum = 0;
-   icmp->icmp_chksum = in_cksum((unsigned short *)icmp, 
-                                 sizeof(struct icmpheader));
-
-   /*********************************************************
-      Step 2: Fill in the IP header.
-    ********************************************************/
-   struct ipheader *ip = (struct ipheader *) buffer;
-   ip->iph_ver = 4;
-   ip->iph_ihl = 5;
-   ip->iph_ttl = 20;
-   ip->iph_sourceip.s_addr = inet_addr("1.2.3.4");
-   ip->iph_destip.s_addr = inet_addr(dest);
-   ip->iph_protocol = IPPROTO_ICMP; 
-   ip->iph_len = htons(sizeof(struct ipheader) + 
-                       sizeof(struct icmpheader));
-
-
-    
-
-   /*********************************************************
-      Step 3: Finally, send the spoofed packet
-    ********************************************************/
-   send_raw_ip_packet (ip);
-
-   return 0;
-}
-
-
-
-
-
-
-
-
-
-
-/******************************************************************
-  Spoof a UDP packet using an arbitrary source IP Address and port 
-*******************************************************************/
-int spoofUDP(char *dest, int port) {
-   char buffer[1500];
-
-   memset(buffer, 0, 1500);
-   struct ipheader *ip = (struct ipheader *) buffer;
-   struct udpheader *udp = (struct udpheader *) (buffer +
-                                          sizeof(struct ipheader));
-
-   /*********************************************************
-      Step 1: Fill in the UDP data field.
-    ********************************************************/
-   char *data = buffer + sizeof(struct ipheader) + 
-                         sizeof(struct udpheader);
-   const char *msg = "Hello Server!\n";
-   int data_len = strlen(msg);
-   strncpy (data, msg, data_len);
-
-   /*********************************************************
-      Step 2: Fill in the UDP header.
-    ********************************************************/
-   udp->udp_sport = htons(12345);
-   udp->udp_dport = htons(port);
-   udp->udp_ulen = htons(sizeof(struct udpheader) + data_len);
-   udp->udp_sum =  0; /* Many OSes ignore this field, so we do not 
-                         calculate it. */
-
-   /*********************************************************
-      Step 3: Fill in the IP header.
-    ********************************************************/
-
-   ip->iph_ver = 4;
-   ip->iph_ihl = 5;
-   ip->iph_ttl = 21;
-   ip->iph_sourceip.s_addr = inet_addr("1.2.3.4");
-   ip->iph_destip.s_addr = inet_addr(dest);
-   ip->iph_protocol = IPPROTO_UDP; 
-   ip->iph_len = htons(sizeof(struct ipheader) + 
-                       sizeof(struct icmpheader) + data_len);
-
-
-   /*********************************************************
-      Step 4: Finally, send the spoofed packet
-    ********************************************************/
-   send_raw_ip_packet (ip);
-
-   return 0;
-}
-
-
-
-int main(){
-
-  int choice=-1;
-  while(choice!=0){
-
-    printf("Enter (1) to spoof ICMP packet\nEnter (2) to spoof UDP packet\nEnter (0) to exit\n");
-    scanf("%d",&choice);
-
-    
-    if(choice==1){
-      char dest[16];
-      printf("Enter ip to send spoofed packet: ");
-      scanf("%s",dest);
-      int spoofer=spoofICMP(dest);
-      if(spoofer!=0){
-        perror("(-) Spoofing failed.\n");
-        exit(EXIT_FAILURE);
-      }else{
-        printf("(+) Spoofed successfully.\n");
-      }
-    }
-
-    else if(choice==2){
-      char dest[16];
-      int port=0;
-      printf("Enter ip to send spoofed packet: ");
-      scanf("%s",dest);
-      printf("Enter port to send spoofed packet: ");
-      scanf("\n %d",&port);
-      int spoofer=spoofUDP(dest,port);
-      if(spoofer!=0){
-        perror("(-) Spoofing failed.\n");
-        exit(EXIT_FAILURE);
-      }else{ 
-        printf("(+) Spoofed successfully.\n");
-        
-      }
-    }
-    else{
-      perror("(-) Invalid input. \n");
-      exit(EXIT_FAILURE);
-    }
-    printf("\nEnter (1) to spoof ICMP packet\nEnter (2) to spoof UDP packet\nEnter (0) to exit\n");
-    scanf("%d",&choice);
-  }
-  
-  return 0;
 }

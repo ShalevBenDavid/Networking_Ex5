@@ -1,28 +1,29 @@
-// Created by Shalev Ben David on 12/01/2023.
+// Created by Shalev Ben David and Ron Shuster.
 
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <sys/socket.h>
 #include <linux/if_packet.h>
 #include <net/ethernet.h>
+#include <strings.h>
 #include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <net/ethernet.h>
+#include <time.h>
 #include <pcap.h>
 #include <arpa/inet.h>
+#include <unistd.h>
+#include <stdlib.h>
 
-#define PACKET_LEN 512
+#define PACKET_LEN 8192
 
-char data[PACKET_LEN]; // The buffer to hold the packet.
+int packetNum = 0;
+char data[PACKET_LEN]; // The buffer to hold the packets' data.
 
 int sniffer();
 void got_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
-
-/* Ethernet header */
-struct eth_header {
-    u_char  ether_dhost[ETHER_ADDR_LEN]; /* destination host address */
-    u_char  ether_shost[ETHER_ADDR_LEN]; /* source host address */
-    u_short ether_type;                  /* IP? ARP? RARP? etc */
-};
 
 /* IP Header */
 struct ip_header {
@@ -43,118 +44,101 @@ struct ip_header {
 struct app_header {
     uint32_t unixtime;
     uint16_t length;
-    uint16_t reserved:3,c_flag:1,s_flag:1,t_flag:1,status:10;
+    union {
+        uint16_t flags;
+        uint16_t reserved:3,c_flag:1,s_flag:1,t_flag:1,status:10;
+    };
     uint16_t cache;
     uint16_t padding;
 };
 
-struct tcp_header {
-    unsigned short source_port;  // source port
-    unsigned short dest_port;    // destination port
-    unsigned int   sequence;     // sequence number - 32 bits
-    unsigned int   acknowledge;  // acknowledgement number - 32 bits
-
-    unsigned char  ns   :1;          //Nonce Sum Flag Added in RFC 3540.
-    unsigned char  reserved_part1:3; //according to rfc
-    unsigned char  data_offset:4;    //number of dwords in the TCP header.
-
-    unsigned char  fin  :1;      //Finish Flag
-    unsigned char  syn  :1;      //Synchronise Flag
-    unsigned char  rst  :1;      //Reset Flag
-    unsigned char  psh  :1;      //Push Flag
-    unsigned char  ack  :1;      //Acknowledgement Flag
-    unsigned char  urg  :1;      //Urgent Flag
-
-    unsigned char  ecn  :1;      //ECN-Echo Flag
-    unsigned char  cwr  :1;      //Congestion Window Reduced Flag
-
-    unsigned short window;          // window
-    unsigned short checksum;        // checksum
-    unsigned short urgent_pointer;  // urgent pointer
-};
-
 int main()
 {
-    // ------------------------------- Creating RAW Sockets -------------------------------
-    struct sockaddr saddr;
-    struct packet_mreq mr;
-
-    // Create the raw socket and allow him to capture all types of packets.
-    int sock = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-
-    // Turn on the promiscuous mode.
-    mr.mr_type = PACKET_MR_PROMISC;
-    setsockopt(sock, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mr, sizeof(mr));
-
-    // Getting captured packets
-    while (1) {
-        ssize_t data_size = recvfrom(sock, data, PACKET_LEN, 0, &saddr, (socklen_t*)sizeof(saddr));
-        if(data_size) {
-            sniffer();
-            printf("Got one packet\n");
-        }
-    }
-    close(sock);
+    // ------------------------------- Create Sniffer And Sniff Packets-------------------------------
+    sniffer();
     return 0;
 }
 
-/***********************************
- * Packet Capturing using raw socket
- ***********************************/
+/********************************
+ * Packet Capturing Using Sniffer
+ ********************************/
+
 int sniffer() {
-        pcap_t *handle;
-        char errbuf[PCAP_ERRBUF_SIZE];
-        struct bpf_program fp;
-        char filter_exp[] = "ip proto icmp";
-        bpf_u_int32 net;
+    pcap_t *handle;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    struct bpf_program fp;
+    char filter_exp[] = "tcp";
+    bpf_u_int32 net = 0;
 
-        // Step 1: Open live pcap session on NIC with name eth3
-        handle = pcap_open_live("eth3", BUFSIZ, 1, 1000, errbuf);
+    // Step 1: Open live pcap session on NIC.
+    printf("Opening device for sniffing...\n");
+    handle = pcap_open_live("lo", PACKET_LEN, 1, 1000, errbuf);
 
-        // Step 2: Compile filter_exp into BPF psuedo-code
-        pcap_compile(handle, &fp, filter_exp, 0, net);
-        pcap_setfilter(handle, &fp);
+    // Step 2: Compile filter_exp into BPF psuedo-code
+    printf("Setting the filter for TCP packets only.\n");
+    pcap_compile(handle, &fp, filter_exp, 0, net);
+    pcap_setfilter(handle, &fp);
 
-        // Step 3: Capture packets
-        void (*pcap_handler) (u_char *, const struct pcap_pkthdr *, const u_char *);
-        pcap_handler = got_packet;
-        pcap_loop(handle, -1, pcap_handler, NULL);
+    // Step 3: Capture packets
+    pcap_loop(handle, -1, got_packet, NULL);
 
-        pcap_close(handle);   //Close the handle
-        return 0;
+    // Step 4: Close the handle
+    pcap_close(handle);
+
+    return 0;
 }
 
-
-/***********************************
- * Packet Handeling
- ***********************************/
+/*****************
+ * Packet Handling
+ *****************/
 
 void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
 
     // Creating pointer to the ethernet header.
-    struct eth_header *eth = (struct eth_header *) packet;
+    struct ether_header *eth = (struct ether_header *) packet;
 
-    if (ntohs(eth->ether_type) == 0x0800) { // 0x0800 is IP type
+    if (ntohs(eth -> ether_type) == 0x0800) { // 0x0800 is IP type
         // Creating pointer to the ip header.
-        struct ip_header *ip = (struct ip_header *) (packet + sizeof(struct eth_header));
+        struct ip_header *ip = (struct ip_header *) (packet + sizeof(struct ether_header));
         // Creating pointer to the tcp header.
-        struct tcp_header *tcp = (struct tcp_header *) ((u_char *) ip + sizeof(struct ip_header));
+        struct tcphdr *tcp = (struct tcphdr *) (packet + sizeof(struct ether_header) + ip -> iph_ihl * 4);
         // Creating pointer to the app header.
-        struct app_header *app = (struct app_header *) ((packet + (tcp->data_offset * 4)));
-        FILE *file_pointer;
-        file_pointer = fopen("325092781_318848413", "a");
-        if (file_pointer == NULL) {
-            printf("Could not open file");
-        }
-        char hex_data[2 * strlen(data) + 1];
-        for (int i = 0; i < strlen(data); i++) {
-            sprintf(hex_data + i * 2, "%02x", data[i]);
-        }
-        fprintf(file_pointer, "source_ip: %s, dest_ip: %s, source_port: %d, dest_port: &d, "
-                              "timestamp: %u, total_length: %u, cache_flag: %u, steps_flag: %u, "
-                              "type_flag: %u, status_code: %u, cache_control: %u, data: %s\n\n",
-                inet_ntoa(ip->iph_sourceip), inet_ntoa(ip->iph_destip), ntohs(tcp->source_port),
-                ntohs(tcp->dest_port), app->unixtime, app->length, app->c_flag, app->s_flag,
-                app->t_flag, app->cache, hex_data);
+        struct app_header *app = (struct app_header *) (packet + sizeof(struct ether_header)
+                + ip -> iph_ihl * 4 + tcp -> th_off * 4);
+
+            // Creating file pointer in "appending" state.
+            FILE *file_pointer;
+            file_pointer = fopen("325092781_318848413", "a");
+            // Check if file opened successfully.
+            if (file_pointer == NULL) {
+                printf("Could not open file");
+            }
+
+            // Converting the unix_time to time format and storing it as a string.
+            char timestamp_formatted[32];
+            time_t t = (time_t)ntohl(app -> unixtime);
+            struct tm *unix_time = localtime(&t);
+            strftime(timestamp_formatted, 20, "%Y-%m-%d %H:%M:%S", unix_time);
+
+            app -> flags = ntohs(app -> flags);
+            // Outputting to the file the packet's header.
+            fprintf(file_pointer, "---------------------> Packet: %d <---------------------"
+                                  "\n(*) source_ip: %s\n(*) dest_ip: %s\n(*) source_port: %d\n(*) dest_port: %d\n"
+                                  "(*) timestamp: %s\n(*) total_length: %u\n(*) cache_flag: %u\n(*) steps_flag: %u\n"
+                                  "(*) type_flag: %u\n(*) status_code: %u\n(*) cache_control: %u\n(+) data:\n",
+                    packetNum++, inet_ntoa(ip->iph_sourceip), inet_ntoa(ip->iph_destip), ntohs(tcp->th_sport),
+                    ntohs(tcp->th_dport), timestamp_formatted, ntohs(app -> length), (app -> flags >> 12) & 1,
+                    (app -> flags >> 11) & 1, (app -> flags >> 10) & 1, app -> status,ntohs(app -> cache));
+            packet = packet + sizeof(struct ether_header) + ip -> iph_ihl * 4 +tcp -> th_off * 4 + 12;
+
+            // Outputting the data to the file
+            for (int i = 0; i < header->len; i++) {
+                if (!(i & 15)) fprintf(file_pointer, "\n   %04X:  ", i);
+                fprintf(file_pointer, "%02X ", ((unsigned char *) packet)[i]);
+            }
+            fprintf(file_pointer, "\n\n");
+
+            // closing the file.
+            fclose(file_pointer);
     }
 }
