@@ -126,7 +126,7 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                                   "\n(*) source_ip: %s\n(*) dest_ip: %s\n(*) source_port: %d\n(*) dest_port: %d\n"
                                   "(*) timestamp: %s\n(*) total_length: %u\n(*) cache_flag: %u\n(*) steps_flag: %u\n"
                                   "(*) type_flag: %u\n(*) status_code: %u\n(*) cache_control: %u\n(+) data:\n",
-                    packetNum++, inet_ntoa(ip->iph_sourceip), inet_ntoa(ip->iph_destip), ntohs(tcp->th_sport),
+                    packetNum++, inet_ntoa(ip -> iph_sourceip), inet_ntoa(ip -> iph_destip), ntohs(tcp -> th_sport),
                     ntohs(tcp->th_dport), timestamp_formatted, ntohs(app -> length), (app -> flags >> 12) & 1,
                     (app -> flags >> 11) & 1, (app -> flags >> 10) & 1, app -> status,ntohs(app -> cache));
             packet = packet + sizeof(struct ether_header) + ip -> iph_ihl * 4 +tcp -> th_off * 4 + 12;

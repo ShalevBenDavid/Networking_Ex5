@@ -106,26 +106,22 @@ void spoof_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *
     printf("header len: %d\n", header->len);
     unsigned char* spoofed = (unsigned char*) malloc (header -> len - sizeof(struct ethhdr));
     if (spoofed == NULL) {
-        printf("ma nigga is null!\n");
+        printf("Allocation failed!\n");
         return;
     }
 
-    for (int i = 0; i < header->len - sizeof(struct ether_addr); i++) {
-        if (!(i & 15)) printf("\n   %04X:  ", i);
-        printf("%02X ", ((unsigned char *) packet + sizeof(struct ether_addr))[i]);
-    }
     printf("\n-------spoofed--------\n\n");
     struct ipheader *ip_spoofed = (struct ipheader *) spoofed; // Pointer to ip header of spoofed packet.
     struct ipheader *ip_original = (struct ipheader *) (packet + sizeof(struct ethhdr)); // Pointer to ip header of original// packet.
     struct icmpheader *icmp_spoofed = (struct icmpheader *) (spoofed + sizeof(struct ipheader));
     struct icmpheader *icmp_original = (struct icmpheader *) (packet + sizeof(struct ipheader) + sizeof(struct ethhdr));
 
-    memcpy(ip_spoofed, ip_original, header->len - sizeof(struct ether_addr));
-
+    memcpy(ip_spoofed, ip_original, header -> len - sizeof(struct ether_addr));
+    if (icmp_original -> icmp_type == 8) {
         /*********************************************************
            Step 1: Fill in the ICMP header.
          ********************************************************/
-        icmp_spoofed -> icmp_type = 0; // Copy ICMP Type (Request\Response).
+        icmp_spoofed -> icmp_type = 0; // Spoofing an echo response.
         // Calculate the checksum for integrity
         icmp_spoofed -> icmp_chksum = 0;
         icmp_spoofed -> icmp_chksum = in_cksum((unsigned short *) icmp_spoofed, sizeof(struct icmpheader));
@@ -134,23 +130,18 @@ void spoof_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *
            Step 2: Fill in the IP header.
          ********************************************************/
         ip_spoofed -> iph_ver = 4;
-        ip_spoofed -> iph_ihl = ip_original->iph_ihl;
-        ip_spoofed -> iph_ttl = ip_original->iph_ttl;
-        ip_spoofed -> iph_sourceip.s_addr = inet_addr("1.2.3.4");
-        ip_spoofed -> iph_destip.s_addr = ip_original -> iph_sourceip.s_addr;//inet_addr("192.168.64.8");    //ip_original -> iph_sourceip.s_addr;;
-        ip_spoofed -> iph_protocol = ip_original -> iph_protocol;
-        ip_spoofed -> iph_len =  ip_original->iph_len;
-
-    for (int i = 0; i < header->len - sizeof(struct ether_addr); i++) {
-        if (!(i & 15)) printf("\n   %04X:  ", i);
-        printf("%02X ", ((unsigned char *) ip_spoofed)[i]);
-    }
-    printf("--------\n");
+        ip_spoofed -> iph_ihl = ip_original -> iph_ihl;
+        ip_spoofed->iph_ttl = ip_original -> iph_ttl;
+        ip_spoofed->iph_sourceip.s_addr = inet_addr("1.2.3.4");
+        ip_spoofed->iph_destip.s_addr = ip_original -> iph_sourceip.s_addr;
+        ip_spoofed->iph_protocol = ip_original -> iph_protocol;
+        ip_spoofed->iph_len = ip_original -> iph_len;
 
         /*********************************************************
            Step 3: Finally, send the spoofed packet
          ********************************************************/
         send_raw_ip_packet(ip_spoofed);
+    }
     free(spoofed);
 }
 

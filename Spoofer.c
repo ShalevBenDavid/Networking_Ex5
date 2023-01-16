@@ -5,11 +5,15 @@
 #include <sys/socket.h>
 #include <netinet/ip.h>
 #include <stdlib.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
+
+ int seq = 0;
 
 unsigned short in_cksum(unsigned short *, int);
 int spoofICMP(char *);
 int spoofUDP(char *, int);
+int spoofTCP(char *, int);
 
 /* ICMP Header  */
 struct icmpheader {
@@ -51,7 +55,8 @@ struct udpheader
 *********************************************************/
 int main() {
     int choice = 0;
-    printf("Enter (1) to spoof ICMP packet\nEnter (2) to spoof UDP packet\nEnter (0) to exit\n");
+    printf("Enter (1) to spoof ICMP packet\nEnter (2) to spoof UDP packet\nEnter (3) to spoof TCP packet\n"
+           "Enter (0) to exit\n");
     scanf("%d", &choice);
     while(choice != 0) {
         if(choice == 1) { // ICMP
@@ -82,11 +87,29 @@ int main() {
                 printf("(+) Spoofed successfully.\n");
             }
         }
+
+        else if (choice == 3) { // TCP
+            char dest[16];
+            int port = 0;
+            printf("Enter ip to send spoofed packet: ");
+            scanf("%s", dest);
+            printf("Enter port to send spoofed packet: ");
+            scanf("\n %d", &port);
+            int spoofer = spoofTCP(dest,port);
+            if (spoofer != 0) {
+                perror("(-) Spoofing failed.\n");
+                exit(EXIT_FAILURE);
+            } else {
+                printf("(+) Spoofed successfully.\n");
+            }
+        }
+
         else {
             perror("(-) Invalid input. \n");
             exit(EXIT_FAILURE);
         }
-        printf("Enter (1) to spoof ICMP packet\nEnter (2) to spoof UDP packet\nEnter (0) to exit\n");
+        printf("Enter (1) to spoof ICMP packet\nEnter (2) to spoof UDP packet\nEnter (3) to spoof TCP packet\n"
+               "Enter (0) to exit\n");
         scanf("%d", &choice);
     }
     return 0;
@@ -162,15 +185,13 @@ int spoofUDP(char *dest, int port) {
 
    memset(buffer, 0, 1500);
    struct ipheader *ip = (struct ipheader *) buffer;
-   struct udpheader *udp = (struct udpheader *) (buffer +
-                                          sizeof(struct ipheader));
+   struct udpheader *udp = (struct udpheader *) (buffer + sizeof(struct ipheader));
 
    /*********************************************************
       Step 1: Fill in the UDP data field.
     ********************************************************/
-   char *data = buffer + sizeof(struct ipheader) +
-                         sizeof(struct udpheader);
-   const char *msg = "Hello Server!\n";
+   char *data = buffer + sizeof(struct ipheader) + sizeof(struct udpheader);
+   const char *msg = "This is a fake ping!\n";
    int data_len = strlen(msg);
    strncpy (data, msg, data_len);
 
@@ -186,7 +207,6 @@ int spoofUDP(char *dest, int port) {
    /*********************************************************
       Step 3: Fill in the IP header.
     ********************************************************/
-
    ip -> iph_ver = 4;
    ip -> iph_ihl = 5;
    ip -> iph_ttl = 21;
@@ -211,38 +231,38 @@ int spoofTCP(char *dest, int port) {
 
     memset(buffer, 0, 1500);
     struct ipheader *ip = (struct ipheader *) buffer;
-    struct udpheader *udp = (struct udpheader *) (buffer +
-                                                  sizeof(struct ipheader));
+    struct tcphdr *tcp = (struct tcphdr *) (buffer + sizeof(struct ipheader));
 
     /*********************************************************
-       Step 1: Fill in the UDP data field.
+       Step 1: Fill in the TCP data field.
      ********************************************************/
-    char *data = buffer + sizeof(struct ipheader) +
-                 sizeof(struct udpheader);
-    const char *msg = "Hello Server!\n";
+    char *data = buffer + sizeof(struct ipheader) + sizeof(struct tcphdr);
+    const char *msg = "This is a fake ping!\n";
     int data_len = strlen(msg);
     strncpy (data, msg, data_len);
 
     /*********************************************************
-       Step 2: Fill in the UDP header.
+       Step 2: Fill in the TCP header.
      ********************************************************/
-    udp -> udp_sport = htons(12345);
-    udp -> udp_dport = htons(port);
-    udp -> udp_ulen = htons(sizeof(struct udpheader) + data_len);
-    udp -> udp_sum =  0; /* Many OSes ignore this field, so we do not
-                         calculate it. */
+    tcp -> th_sport = htons(12345);
+    tcp -> th_dport = htons(port);
+    tcp -> th_ack = 1;
+    tcp -> th_seq = seq++;
+    tcp -> th_flags = 0x08; // Push type;
+    tcp -> th_off = 5; // The offset is 5 meaning our tcp length is 28.
+    tcp -> th_win = htons(1000);
+    tcp -> th_sum = in_cksum((unsigned short *)tcp,sizeof(struct tcphdr) + data_len);
 
     /*********************************************************
        Step 3: Fill in the IP header.
      ********************************************************/
-
     ip -> iph_ver = 4;
     ip -> iph_ihl = 5;
     ip -> iph_ttl = 21;
     ip -> iph_sourceip.s_addr = inet_addr("1.2.3.4"); // Spoofed source ip address.
     ip -> iph_destip.s_addr = inet_addr(dest); // Same destination ip.
-    ip -> iph_protocol = IPPROTO_UDP;
-    ip -> iph_len = htons(sizeof(struct ipheader) +sizeof(struct icmpheader) + data_len);
+    ip -> iph_protocol = IPPROTO_TCP;
+    ip -> iph_len = htons(sizeof(struct ipheader) + sizeof(struct tcphdr) + data_len);
 
     /*********************************************************
        Step 4: Finally, send the spoofed packet
