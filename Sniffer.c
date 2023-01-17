@@ -46,7 +46,7 @@ struct app_header {
     uint16_t length;
     union {
         uint16_t flags;
-        uint16_t reserved:3,c_flag:1,s_flag:1,t_flag:1,status:10;
+        uint16_t reserved:3, c_flag:1, s_flag:1, t_flag:1, status:10;
     };
     uint16_t cache;
     uint16_t padding;
@@ -71,11 +71,11 @@ int sniffer() {
     bpf_u_int32 net = 0;
 
     // Step 1: Open live pcap session on NIC.
-    printf("Opening device for sniffing...\n");
+    printf("(!) Opening device for sniffing...\n");
     handle = pcap_open_live("lo", PACKET_LEN, 1, 1000, errbuf);
 
     // Step 2: Compile filter_exp into BPF psuedo-code
-    printf("Setting the filter for TCP packets only.\n");
+    printf("(!) Setting the filter for TCP packets only.\n");
     pcap_compile(handle, &fp, filter_exp, 0, net);
     pcap_setfilter(handle, &fp);
 
@@ -105,40 +105,48 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
         // Creating pointer to the app header.
         struct app_header *app = (struct app_header *) (packet + sizeof(struct ether_header)
                 + ip -> iph_ihl * 4 + tcp -> th_off * 4);
-
+        if (tcp -> psh) {
             // Creating file pointer in "appending" state.
             FILE *file_pointer;
             file_pointer = fopen("325092781_318848413", "a");
             // Check if file opened successfully.
             if (file_pointer == NULL) {
-                printf("Could not open file");
+                printf("(-) Could not open file\n");
+                exit(EXIT_FAILURE);
             }
 
             // Converting the unix_time to time format and storing it as a string.
             char timestamp_formatted[32];
-            time_t t = (time_t)ntohl(app -> unixtime);
+            time_t t = (time_t) ntohl(app -> unixtime);
             struct tm *unix_time = localtime(&t);
             strftime(timestamp_formatted, 20, "%Y-%m-%d %H:%M:%S", unix_time);
 
-            app -> flags = ntohs(app -> flags);
+            app -> flags = ntohs(app->flags);
             // Outputting to the file the packet's header.
+            printf("(+) Packet #%d data is being copied to the the file.\n", packetNum);
             fprintf(file_pointer, "---------------------> Packet: %d <---------------------"
-                                  "\n(*) source_ip: %s\n(*) dest_ip: %s\n(*) source_port: %d\n(*) dest_port: %d\n"
-                                  "(*) timestamp: %s\n(*) total_length: %u\n(*) cache_flag: %u\n(*) steps_flag: %u\n"
-                                  "(*) type_flag: %u\n(*) status_code: %u\n(*) cache_control: %u\n(+) data:\n",
+                                  "\n\n>>>>>>>>>>>>>>>>>>>> IP Header <<<<<<<<<<<<<<<<<<<<<<<\n"
+                                  "\n(*) source_ip: %s\n(*) dest_ip: %s\n"
+                                  "\n>>>>>>>>>>>>>>>>>>>> TCP Header <<<<<<<<<<<<<<<<<<<<<<<\n"
+                                  "\n(*) source_port: %d\n(*) dest_port: %d\n"
+                                  "\n>>>>>>>>>>>>>>>>>>>> APP Header <<<<<<<<<<<<<<<<<<<<<<<\n"
+                                  "\n(*) timestamp: %s\n(*) total_length: %u\n(*) cache_flag: %u\n(*) steps_flag: %u\n"
+                                  "(*) type_flag: %u\n(*) status_code: %u\n(*) cache_control: %u\n"
+                                  "\n>>>>>>>>>>>>>>>>>>>>>> PAYLOAD <<<<<<<<<<<<<<<<<<<<<<<<<\n",
                     packetNum++, inet_ntoa(ip -> iph_sourceip), inet_ntoa(ip -> iph_destip), ntohs(tcp -> th_sport),
-                    ntohs(tcp->th_dport), timestamp_formatted, ntohs(app -> length), (app -> flags >> 12) & 1,
-                    (app -> flags >> 11) & 1, (app -> flags >> 10) & 1, app -> status,ntohs(app -> cache));
-            packet = packet + sizeof(struct ether_header) + ip -> iph_ihl * 4 +tcp -> th_off * 4 + 12;
+                    ntohs(tcp -> th_dport), timestamp_formatted, ntohs(app -> length), (app -> flags >> 12) & 1,
+                    (app -> flags >> 11) & 1, (app -> flags >> 10) & 1, app -> status, ntohs(app -> cache));
+            packet = packet + sizeof(struct ether_header) + ip -> iph_ihl * 4 + tcp -> th_off * 4 + 12;
 
             // Outputting the data to the file
             for (int i = 0; i < header->len; i++) {
-                if (!(i & 15)) fprintf(file_pointer, "\n   %04X:  ", i);
+                if (!(i & 15)) fprintf(file_pointer, "\n  %04X:  ", i);
                 fprintf(file_pointer, "%02X ", ((unsigned char *) packet)[i]);
             }
             fprintf(file_pointer, "\n\n");
 
             // closing the file.
             fclose(file_pointer);
+        }
     }
 }

@@ -7,8 +7,9 @@
 #include <stdlib.h>
 #include <netinet/tcp.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
- int seq = 0;
+int seq = 0;
 
 unsigned short in_cksum(unsigned short *, int);
 int spoofICMP(char *);
@@ -63,14 +64,9 @@ int main() {
             char dest[16];
             printf("Enter ip to send spoofed packet: ");
             scanf("%s",dest);
-            int spoofer = spoofICMP(dest);
-            if (spoofer!=0){
-                perror("(-) Spoofing failed.\n");
-                exit(EXIT_FAILURE);
-            } else {
-                printf("(+) Spoofed successfully.\n");
+            spoofICMP(dest);
+            printf("(+) Spoofed ICMP packet successfully.\n");
             }
-        }
 
         else if (choice == 2) { // UDP
             char dest[16];
@@ -79,13 +75,8 @@ int main() {
             scanf("%s", dest);
             printf("Enter port to send spoofed packet: ");
             scanf("\n %d", &port);
-            int spoofer = spoofUDP(dest,port);
-            if (spoofer != 0) {
-                perror("(-) Spoofing failed.\n");
-                exit(EXIT_FAILURE);
-            } else {
-                printf("(+) Spoofed successfully.\n");
-            }
+            spoofUDP(dest,port);
+            printf("(+) Spoofed UDP packet successfully.\n");
         }
 
         else if (choice == 3) { // TCP
@@ -95,18 +86,12 @@ int main() {
             scanf("%s", dest);
             printf("Enter port to send spoofed packet: ");
             scanf("\n %d", &port);
-            int spoofer = spoofTCP(dest,port);
-            if (spoofer != 0) {
-                perror("(-) Spoofing failed.\n");
-                exit(EXIT_FAILURE);
-            } else {
-                printf("(+) Spoofed successfully.\n");
-            }
+            spoofTCP(dest,port);
+            printf("(+) Spoofed TCP packet successfully.\n");
         }
 
         else {
-            perror("(-) Invalid input. \n");
-            exit(EXIT_FAILURE);
+            perror("(-) Invalid input. Try again. \n");
         }
         printf("Enter (1) to spoof ICMP packet\nEnter (2) to spoof UDP packet\nEnter (3) to spoof TCP packet\n"
                "Enter (0) to exit\n");
@@ -134,7 +119,13 @@ void send_raw_ip_packet(struct ipheader* ip)
     dest_info.sin_addr = ip -> iph_destip;
 
     // Step 4: Send the packet out.
-    sendto(sock, ip, ntohs(ip->iph_len), 0, (struct sockaddr *)&dest_info, sizeof(dest_info));
+    if (sendto(sock, ip, ntohs(ip->iph_len), 0, (struct sockaddr *)&dest_info, sizeof(dest_info)) == -1) {
+        perror("(-) Error in sending spoofed packet.\n");
+        exit(EXIT_FAILURE);
+    }
+    else {
+        printf("(+) Created and sent the spoofed packet.\n");
+    }
 
     // Step 5: Close the socket.
     close(sock);
