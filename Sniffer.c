@@ -17,15 +17,14 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-#define PACKET_LEN 8192
+#define PACKET_LEN 8192 // Maximus TCP packet size to sniff.
 
-int packetNum = 0;
-char data[PACKET_LEN]; // The buffer to hold the packets' data.
+int packetNum = 0; // Number of the packet we are sniffing.
 
-int sniffer();
-void got_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
+int sniffer(); // Method to sniff TCP packets.
+void got_packet(u_char *, const struct pcap_pkthdr *, const u_char *); // Method to handle packets.
 
-/* IP Header */
+/* IP Header */i
 struct ip_header {
     unsigned char      iph_ihl:4, //IP header length
     iph_ver:4; //IP version
@@ -111,15 +110,15 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
             file_pointer = fopen("325092781_318848413", "a");
             // Check if file opened successfully.
             if (file_pointer == NULL) {
-                printf("(-) Could not open file\n");
+                perror("(-) Could not open file\n");
                 exit(EXIT_FAILURE);
             }
 
             // Converting the unix_time to time format and storing it as a string.
-            char timestamp_formatted[32];
+            char time[32];
             time_t t = (time_t) ntohl(app -> unixtime);
             struct tm *unix_time = localtime(&t);
-            strftime(timestamp_formatted, 20, "%Y-%m-%d %H:%M:%S", unix_time);
+            strftime(time, 20, "%Y-%m-%d %H:%M:%S", unix_time);
 
             app -> flags = ntohs(app->flags);
             // Outputting to the file the packet's header.
@@ -134,7 +133,7 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                                   "(*) type_flag: %u\n(*) status_code: %u\n(*) cache_control: %u\n"
                                   "\n>>>>>>>>>>>>>>>>>>>>>> PAYLOAD <<<<<<<<<<<<<<<<<<<<<<<<<\n",
                     packetNum++, inet_ntoa(ip -> iph_sourceip), inet_ntoa(ip -> iph_destip), ntohs(tcp -> th_sport),
-                    ntohs(tcp -> th_dport), timestamp_formatted, ntohs(app -> length), (app -> flags >> 12) & 1,
+                    ntohs(tcp -> th_dport), time, ntohs(app -> length), (app -> flags >> 12) & 1,
                     (app -> flags >> 11) & 1, (app -> flags >> 10) & 1, app -> status, ntohs(app -> cache));
             packet = packet + sizeof(struct ether_header) + ip -> iph_ihl * 4 + tcp -> th_off * 4 + 12;
 

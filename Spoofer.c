@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <netinet/ip.h>
 #include <stdlib.h>
 #include <netinet/tcp.h>
 #include <unistd.h>
