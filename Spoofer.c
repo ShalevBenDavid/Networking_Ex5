@@ -8,12 +8,12 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
-int seq = 0;
+int seq = 0; // A sequence number for the spoofed TCP packets.
 
-unsigned short in_cksum(unsigned short *, int);
-int spoofICMP(char *);
-int spoofUDP(char *, int);
-int spoofTCP(char *, int);
+unsigned short in_cksum(unsigned short *, int); // check-sum method to validate.
+int spoofICMP(char *); // Method that spoofs an ICMP packet.
+int spoofUDP(char *, int); // Method that spoofs a UDP packet.
+int spoofTCP(char *, int); // Method that spoofs a TCP packet.
 
 /* ICMP Header  */
 struct icmpheader {
@@ -181,7 +181,7 @@ int spoofUDP(char *dest, int port) {
       Step 1: Fill in the UDP data field.
     ********************************************************/
    char *data = buffer + sizeof(struct ipheader) + sizeof(struct udpheader);
-   const char *msg = "This is a fake ping!\n";
+   const char *msg = "This is a fake packet!\n";
    int data_len = strlen(msg);
    strncpy (data, msg, data_len);
 
@@ -227,7 +227,7 @@ int spoofTCP(char *dest, int port) {
        Step 1: Fill in the TCP data field.
      ********************************************************/
     char *data = buffer + sizeof(struct ipheader) + sizeof(struct tcphdr);
-    const char *msg = "This is a fake ping!\n";
+    const char *msg = "This is a fake packet!\n";
     int data_len = strlen(msg);
     strncpy (data, msg, data_len);
 

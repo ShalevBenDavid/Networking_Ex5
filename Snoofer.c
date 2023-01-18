@@ -17,12 +17,12 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-#define PACKET_LEN 1500
+#define PACKET_LEN 1500 // The maximus packet size we allow to sniff.
 
 struct ipheader;
-unsigned short in_cksum(unsigned short *, int );
-void spoof_packet(u_char *, const struct pcap_pkthdr *, const u_char *);
-void send_raw_ip_packet(struct ipheader*);
+unsigned short in_cksum(unsigned short *, int ); // check-sum method to validate.
+void spoof_packet(u_char *, const struct pcap_pkthdr *, const u_char *); // Method to create spoofed ICMP packet.
+void send_raw_ip_packet(struct ipheader*); // Method to send spoofed packet on raw socket.
 
 /* ICMP Header  */
 struct icmpheader {
